@@ -70,16 +70,20 @@ import { request } from '@/api/client'
 type Row = Record<string, string | number | null>
 
 const ENDPOINT = '/api/task'
-const columns = ["任务编号", "任务名称", "关联源端", "采集频率", "增量字段", "起始水位", "批次大小", "执行窗口"]
+const columns = ["任务编号", "任务名称", "关联源端", "关联源端名称", "采集频率", "增量字段", "起始水位", "批次大小", "执行窗口"]
 const actions = ["提交执行", "暂停任务", "恢复任务"]
 const statuses = ["草稿", "待执行", "执行中", "已完成"]
-const stats = [{"label": "采集任务总数", "value": 0}, {"label": "待执行任务", "value": 0}, {"label": "执行中任务", "value": 0}]
 
 const rows = ref<Row[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
-const filterFields = columns.slice(0, 3)
+const filterFields = ["任务编号", "任务名称", "关联源端"]
+const stats = ref([
+  { label: '采集任务总数', value: 0 },
+  { label: '待执行任务', value: 0 },
+  { label: '执行中任务', value: 0 },
+])
 
 function resetFilters() {
   filters.value = {}
@@ -121,6 +125,9 @@ async function reload() {
     const payload = await response.json()
     rows.value = payload.items ?? []
     total.value = payload.total ?? rows.value.length
+    // 看板与待办条目随后端汇总刷新，源端动作联动后这里同步体现
+    const summary = (payload.summary ?? {}) as Record<string, number>
+    stats.value = stats.value.map((item) => ({ ...item, value: summary[item.label] ?? item.value }))
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '采集任务列表读取失败'
   }

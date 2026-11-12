@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.schemas import ActionResult, EntryPayload, PageResult
+from app.schemas import ActionResult, EntryPayload, ListPageResult
 from app.services.source import SourceService
 
 router = APIRouter(prefix="/api/source", tags=["采集源管理"])
@@ -16,18 +16,46 @@ LIST_FIELDS = ["源端编号", "源端名称", "接入协议", "目标地址", "
 STATUSES = ["草稿", "待校验", "已启用", "已停用"]
 
 
-@router.get("", response_model=PageResult[dict])
+@router.get("", response_model=ListPageResult)
 def list_entries(
-    keyword: str | None = Query(default=None, description="按源端编号检索"),
+    keyword: str | None = Query(default=None, description="按源端编号检索（兼容旧参数）"),
     status: str | None = Query(default=None, description="草稿、待校验、已启用、已停用"),
+    code: str | None = Query(default=None, alias="源端编号", description="按源端编号定位"),
+    name: str | None = Query(default=None, alias="源端名称", description="按源端名称定位"),
+    protocol: str | None = Query(default=None, alias="接入协议", description="按接入协议定位"),
+    owner: str | None = Query(default=None, alias="负责人", description="按负责人定位"),
     page: int = 1,
     size: int = 20,
-) -> PageResult[dict]:
-    """按源端编号与状态过滤采集源管理列表；没有数据时返回空页，不报错。"""
+) -> ListPageResult:
+    """按编号、名称、协议、负责人组合定位采集源：条件取并集、状态单独过滤；
+    空结果回显当前条件，不报错也不清空条件。"""
     if size > 200:
         raise HTTPException(status_code=400, detail="每页最多 200 条，请缩小分页范围")
-    items, total = service.list_entries(keyword=keyword, status=status, page=page, size=size)
-    return PageResult(items=items, total=total, page=page, size=size)
+    result = service.list_entries(
+        keyword=keyword,
+        status=status,
+        code=code,
+        name=name,
+        protocol=protocol,
+        owner=owner,
+        page=page,
+        size=size,
+    )
+    return ListPageResult(
+        items=result["items"],
+        total=result["total"],
+        page=page,
+        size=size,
+        conditions=result["conditions"],
+        summary=result["summary"],
+    )
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出采集源管理清单：返回当前过滤条件下的全量数据。"""
+    result = service.list_entries(page=1, size=10000)
+    return {"module": "source", "total": result["total"], "items": result["items"]}
 
 
 @router.get("/{entry_id}", response_model=dict)
@@ -56,10 +84,3 @@ def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出采集源管理清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "source", "total": total, "items": items}

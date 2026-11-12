@@ -15,6 +15,13 @@ class PageResult(BaseModel, Generic[T]):
     size: int = 20
 
 
+class ListPageResult(PageResult[dict[str, Any]]):
+    """扩展分页结果：回显生效条件与模块汇总，支撑空结果说明与看板待办刷新。"""
+
+    conditions: list[str] = Field(default_factory=list)
+    summary: dict[str, int] = Field(default_factory=dict)
+
+
 class ActionResult(BaseModel):
     ok: bool
     message: str

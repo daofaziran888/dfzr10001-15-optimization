@@ -20,7 +20,7 @@ class TaskService:
         status: str | None = None,
         page: int = 1,
         size: int = 20,
-    ) -> tuple[list[dict[str, Any]], int]:
+    ) -> dict[str, Any]:
         rows = store.rows(MODULE)
         if keyword:
             rows = [row for row in rows if keyword in str(row.get("任务编号", ""))]
@@ -28,7 +28,41 @@ class TaskService:
             rows = [row for row in rows if row.get("status") == status]
         total = len(rows)
         start = max(page - 1, 0) * size
-        return rows[start:start + size], total
+        items = [self.with_source(row) for row in rows[start:start + size]]
+        return {
+            "items": items,
+            "total": total,
+            "conditions": [f"任务编号={keyword}"] if keyword else [],
+            "summary": self._summary(),
+        }
+
+    @staticmethod
+    def with_source(row: dict[str, Any]) -> dict[str, Any]:
+        """按源端编号解析关联源端：命中采集源时带出名称与状态，未登记时明确标注，
+        避免任务页显示与源端对不上的关联信息。"""
+        enriched = dict(row)
+        code = str(row.get("关联源端") or "").strip()
+        source = next(
+            (item for item in store.rows("source") if str(item.get("源端编号") or "").strip() == code),
+            None,
+        )
+        if source is not None:
+            enriched["关联源端名称"] = source.get("源端名称")
+            enriched["源端状态"] = source.get("status")
+        else:
+            enriched["关联源端名称"] = "未登记"
+            enriched["源端状态"] = "未登记"
+        return enriched
+
+    @staticmethod
+    def _summary() -> dict[str, int]:
+        """看板汇总：基于全量采集任务统计，待办条目随源端动作联动后在这里体现。"""
+        rows = store.rows(MODULE)
+        return {
+            "采集任务总数": len(rows),
+            "待执行任务": sum(1 for row in rows if row.get("status") == "待执行"),
+            "执行中任务": sum(1 for row in rows if row.get("status") == "执行中"),
+        }
 
     def get_entry(self, entry_id: int) -> dict[str, Any] | None:
         return store.find(MODULE, entry_id)

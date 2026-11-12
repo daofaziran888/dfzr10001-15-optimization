@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.schemas import ActionResult, EntryPayload, PageResult
+from app.schemas import ActionResult, EntryPayload, ListPageResult
 from app.services.task import TaskService
 
 router = APIRouter(prefix="/api/task", tags=["采集任务"])
@@ -16,18 +16,32 @@ LIST_FIELDS = ["任务编号", "任务名称", "关联源端", "采集频率", "
 STATUSES = ["草稿", "待执行", "执行中", "已完成"]
 
 
-@router.get("", response_model=PageResult[dict])
+@router.get("", response_model=ListPageResult)
 def list_entries(
     keyword: str | None = Query(default=None, description="按任务编号检索"),
     status: str | None = Query(default=None, description="草稿、待执行、执行中、已完成"),
     page: int = 1,
     size: int = 20,
-) -> PageResult[dict]:
-    """按任务编号与状态过滤采集任务列表；没有数据时返回空页，不报错。"""
+) -> ListPageResult:
+    """按任务编号与状态过滤采集任务列表；关联源端随列表解析，没有数据时返回空页，不报错。"""
     if size > 200:
         raise HTTPException(status_code=400, detail="每页最多 200 条，请缩小分页范围")
-    items, total = service.list_entries(keyword=keyword, status=status, page=page, size=size)
-    return PageResult(items=items, total=total, page=page, size=size)
+    result = service.list_entries(keyword=keyword, status=status, page=page, size=size)
+    return ListPageResult(
+        items=result["items"],
+        total=result["total"],
+        page=page,
+        size=size,
+        conditions=result["conditions"],
+        summary=result["summary"],
+    )
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出采集任务清单：返回当前过滤条件下的全量数据。"""
+    result = service.list_entries(page=1, size=10000)
+    return {"module": "task", "total": result["total"], "items": result["items"]}
 
 
 @router.get("/{entry_id}", response_model=dict)
@@ -36,7 +50,7 @@ def get_entry(entry_id: int) -> dict:
     entry = service.get_entry(entry_id)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"采集任务 {entry_id} 不存在或已归档")
-    return entry
+    return service.with_source(entry)
 
 
 @router.post("", response_model=ActionResult)
@@ -56,10 +70,3 @@ def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出采集任务清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "task", "total": total, "items": items}
